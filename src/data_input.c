@@ -45,13 +45,12 @@ uint32_t* sizeOfBMP(FILE* fd) {
 }
 
 Pixel** image2d(FILE* fd, uint32_t pixelOffset) {
+    
     // Setting up the 2-D array for manipulations
     Pixel **image = malloc(height * sizeof(Pixel*));
     for (int i = 0; i < height; i++) {
         image[i] = malloc(width * sizeof(Pixel));
     }
-
-    /*Learn more about what is happening here in terms of the padding [1]*/
 
     // Each BMP row is padded to a multiple of 4 bytes
     int rowSize = (width * 3 + 3) & ~3;

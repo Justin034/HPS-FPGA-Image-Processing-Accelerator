@@ -28,13 +28,9 @@ int main(int argc, char* argv[]) {
 
     // height = size[0], size[1] = size[1]
     uint32_t* size = sizeOfBMP(fd);
-    Pixel ** image = image2d(fd, pixelOffset);
+    Pixel** image = image2d(fd, pixelOffset);
 
-    // Example: print first pixel
-    printf("R=%d G=%d B=%d\n",
-           image[0][0].r,
-           image[0][0].g,
-           image[0][0].b);
+    /*Section to establish connection with the FPGA and enact calculations*/
 
     // Erasing the image memory allocation
     for(int i = 0; i < size[0]; i++) {
