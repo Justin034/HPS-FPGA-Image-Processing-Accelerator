@@ -31,7 +31,7 @@ build/
 /FPGA/*.jic
 
 # Temporary/backup files
-/FPGA/*.bak
+/FPGA/rtl/*.sv.bak
 /FPGA/*.tmp
 /FPGA/*.log
 
