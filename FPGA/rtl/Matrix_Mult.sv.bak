@@ -1,0 +1,14 @@
+module top (
+    input  logic CLOCK_50,
+    output logic LED
+);
+
+    logic [24:0] counter;
+
+    always_ff @(posedge CLOCK_50) begin
+        counter <= counter + 1;
+    end
+
+    assign LED = counter[24];
+
+endmodule

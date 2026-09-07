@@ -10,6 +10,6 @@ typedef struct {
 
 uint32_t* sizeOfBMP(FILE* fd);
 
-Pixel** image2d(FILE* fd, uint32_t pixelOffset);
+Pixel** image2d(FILE* fd);
 
 #endif

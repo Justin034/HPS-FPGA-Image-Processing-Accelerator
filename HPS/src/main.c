@@ -4,7 +4,7 @@
 #include <string.h>
 
 // Personal header files
-#include <data_input.h>
+#include "data_input.h"
 
 int main(int argc, char* argv[]) {
     
@@ -21,16 +21,13 @@ int main(int argc, char* argv[]) {
         return -1;
     }
 
-    // Determine pixel offset
-    uint32_t pixelOffset;
-    fseek(fd, 10, SEEK_SET);
-    fread(&pixelOffset, sizeof(pixelOffset), 1, fd);
-
     // height = size[0], size[1] = size[1]
     uint32_t* size = sizeOfBMP(fd);
-    Pixel** image = image2d(fd, pixelOffset);
+    Pixel** image = image2d(fd);
 
-    /*Section to establish connection with the FPGA and enact calculations*/
+    /*Section to implement the DCT and quantizing steps to then store as a separate file type
+    Future plan is to make another file in the future be able to reverse the process and then compare storage.*/
+
 
     // Erasing the image memory allocation
     for(int i = 0; i < size[0]; i++) {

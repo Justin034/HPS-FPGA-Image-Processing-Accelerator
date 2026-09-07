@@ -4,7 +4,7 @@
 #include <string.h>
 
 // Personal header files
-#include <data_input.h>
+#include "data_input.h"
 
 int32_t width;
 int32_t height;
@@ -44,8 +44,13 @@ uint32_t* sizeOfBMP(FILE* fd) {
 
 }
 
-Pixel** image2d(FILE* fd, uint32_t pixelOffset) {
-    
+Pixel** image2d(FILE* fd) {
+
+    // Determine pixel offset
+    uint32_t pixelOffset;
+    fseek(fd, 10, SEEK_SET);
+    fread(&pixelOffset, sizeof(pixelOffset), 1, fd);
+
     // Setting up the 2-D array for manipulations
     Pixel **image = malloc(height * sizeof(Pixel*));
     for (int i = 0; i < height; i++) {

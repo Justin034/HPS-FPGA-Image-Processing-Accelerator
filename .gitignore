@@ -1,2 +1,40 @@
 *.exe
 *.bmp
+*.png
+
+*.o
+*.elf
+*.bin
+*.hex
+build/
+.vscode/
+.idea/
+
+# Quartus generated files
+/FPGA/db/
+/FPGA/incremental_db/
+/FPGA/output_files/
+
+# Quartus compilation/report files
+/FPGA/*.rpt
+/FPGA/*.summary
+/FPGA/*.smsg
+/FPGA/*.done
+/FPGA/*.jdi
+/FPGA/*.pin
+/FPGA/*.qws
+/FPGA/*.qlog
+
+# Quartus generated programming files
+/FPGA/*.sof
+/FPGA/*.pof
+/FPGA/*.jic
+
+# Temporary/backup files
+/FPGA/*.bak
+/FPGA/*.tmp
+/FPGA/*.log
+
+# Simulation generated files
+/FPGA/simulation/
+/FPGA/modelsim/
