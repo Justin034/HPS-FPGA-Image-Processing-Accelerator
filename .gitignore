@@ -32,8 +32,10 @@ build/
 
 # Temporary/backup files
 /FPGA/rtl/*.sv.bak
+/FPGA/*.bak
 /FPGA/*.tmp
 /FPGA/*.log
+/FPGA/*.txt
 
 # Simulation generated files
 /FPGA/simulation/
