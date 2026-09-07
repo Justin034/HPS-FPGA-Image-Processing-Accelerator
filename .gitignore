@@ -39,3 +39,7 @@ build/
 # Simulation generated files
 /FPGA/simulation/
 /FPGA/modelsim/
+
+# Backup files
+/FPGA/tb/Matrix_Mult_tb.sv.bak
+/FPGA/rtl/Matrix_Mult.sv.bak

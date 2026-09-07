@@ -3,3 +3,6 @@ A project utilizing an DE1-SOC to replicate the effects of PDF compression while
 
 # Initial Planning
 The FPGA's purpose in this project is to compute the DCT matrix calculations required in a PDF-based file compression system. The HPS will be responsible for file I/O and pre/post-processing of the files to create the final compressed file. Plans and designs are subject to change as project progresses
+
+# 09/07/2026 Progress
+The C files to open up files and close the final image are in place. Currently in learning phase of implementing .sv files and connecting the DMA of the board to be used between HPS and FPGA
