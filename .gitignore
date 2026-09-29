@@ -1,45 +1,20 @@
+# Misc. folders and files
+.vscode
 *.exe
 *.bmp
 *.png
 
-*.o
-*.elf
-*.bin
-*.hex
-build/
-.vscode/
-.idea/
+# FPGA
+db
+*.bak
+incremental_db
+output_files
+work
+modelsim.ini
+FPGA/boards/DE1-SOC/c5_pin_model_dump.txt
 
-# Quartus generated files
-/FPGA/db/
-/FPGA/incremental_db/
-/FPGA/output_files/
-
-# Quartus compilation/report files
-/FPGA/*.rpt
-/FPGA/*.summary
-/FPGA/*.smsg
-/FPGA/*.done
-/FPGA/*.jdi
-/FPGA/*.pin
-/FPGA/*.qws
-/FPGA/*.qlog
-
-# Quartus generated programming files
-/FPGA/*.sof
-/FPGA/*.pof
-/FPGA/*.jic
-
-# Temporary/backup files
-/FPGA/*.bak
-/FPGA/*.tmp
-/FPGA/*.log
-/FPGA/*.txt
-
-# Simulation generated files
-/FPGA/simulation/
-/FPGA/modelsim/
-
-# Backup files
-/FPGA/tb/Matrix_Mult_tb.sv.bak
-/FPGA/rtl/Matrix_Mult.sv.bak
+# FPGA Simulation
+FPGA/boards/DE1-SOC/simulation/modelsim/Image-Processing.sft
+FPGA/boards/DE1-SOC/simulation/modelsim/Image-Processing.svo
+FPGA/boards/DE1-SOC/simulation/modelsim/Image-Processing_modelsim.xrf
+FPGA/simulation/vsim.wlf
