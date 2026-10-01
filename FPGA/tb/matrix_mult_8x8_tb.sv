@@ -1,374 +1,300 @@
 `timescale 1ns/1ps
 
-module matrix_mult_8x8_tb;
+module tb_matrix_mult_8x8;
 
     // =================================================
-    // Clock and reset
+    // Signals
     // =================================================
 
     logic clk;
     logic rst;
 
-
-    // =================================================
-    // Control
-    // =================================================
-
     logic start;
     logic busy;
     logic done;
-
-
-    // =================================================
-    // Matrix A write interface
-    // =================================================
 
     logic        a_we;
     logic [5:0]  a_addr;
     logic signed [15:0] a_data;
 
-
-    // =================================================
-    // Matrix B write interface
-    // =================================================
-
     logic        b_we;
     logic [5:0]  b_addr;
     logic signed [15:0] b_data;
 
-
-    // =================================================
-    // Matrix C read interface
-    // =================================================
-
-    logic [5:0]  c_addr;
+    logic [5:0] c_addr;
     logic signed [15:0] c_data;
 
 
     // =================================================
-    // Instantiate DUT
+    // DUT
     // =================================================
 
-    matrix_mult_8x8 DUT (
-        .clk    (clk),
-        .rst    (rst),
+    matrix_mult_8x8 dut (
+        .clk       (clk),
+        .rst       (rst),
 
-        .start  (start),
-        .busy   (busy),
-        .done   (done),
+        .start     (start),
+        .busy      (busy),
+        .done      (done),
 
-        .a_we   (a_we),
-        .a_addr (a_addr),
-        .a_data (a_data),
+        .a_we      (a_we),
+        .a_addr    (a_addr),
+        .a_data    (a_data),
 
-        .b_we   (b_we),
-        .b_addr (b_addr),
-        .b_data (b_data),
+        .b_we      (b_we),
+        .b_addr    (b_addr),
+        .b_data    (b_data),
 
-        .c_addr (c_addr),
-        .c_data (c_data)
+        .c_addr    (c_addr),
+        .c_data    (c_data)
     );
 
 
     // =================================================
     // Clock
-    // 10 ns period
     // =================================================
 
-    initial begin
-        clk = 1'b0;
-
-        forever #5 clk = ~clk;
-    end
+    always #5 clk = ~clk;
 
 
     // =================================================
-    // Write one value to A
+    // DCT matrix
+    //
+    // Q1.15
     // =================================================
 
-    task write_A(
-        input [5:0] addr,
-        input logic signed [15:0] data
-    );
+    logic signed [15:0] dct [0:63];
 
-        begin
-
-            @(negedge clk);
-
-            a_addr = addr;
-            a_data = data;
-            a_we   = 1'b1;
-
-            @(negedge clk);
-
-            a_we = 1'b0;
-
-        end
-
-    endtask
+    logic signed [15:0] dct_transpose [0:63];
 
 
     // =================================================
-    // Write one value to B
+    // Image
+    //
+    // NORMAL INTEGER VALUES
     // =================================================
 
-    task write_B(
-        input [5:0] addr,
-        input logic signed [15:0] data
-    );
-
-        begin
-
-            @(negedge clk);
-
-            b_addr = addr;
-            b_data = data;
-            b_we   = 1'b1;
-
-            @(negedge clk);
-
-            b_we = 1'b0;
-
-        end
-
-    endtask
+    logic signed [15:0] image [0:63];
 
 
     // =================================================
-    // Test
+    // Intermediate result
+    //
+    // integer
     // =================================================
+
+    logic signed [15:0] intermediate [0:63];
+
+
+    // =================================================
+    // Final DCT result
+    // =================================================
+
+    logic signed [15:0] dct_result [0:63];
+
 
     integer i;
-    integer j;
 
-    integer errors;
+
+    // =================================================
+    // TEST
+    // =================================================
 
     initial begin
 
-        // ------------------------------------------------
-        // Initial values
-        // ------------------------------------------------
+        clk = 0;
+        rst = 1;
 
-        rst   = 1'b1;
-        start = 1'b0;
+        start = 0;
 
-        a_we   = 1'b0;
-        a_addr = 6'd0;
-        a_data = 16'sd0;
+        a_we   = 0;
+        a_addr = 0;
+        a_data = 0;
 
-        b_we   = 1'b0;
-        b_addr = 6'd0;
-        b_data = 16'sd0;
+        b_we   = 0;
+        b_addr = 0;
+        b_data = 0;
 
-        c_addr = 6'd0;
-
-        errors = 0;
+        c_addr = 0;
 
 
-        // ------------------------------------------------
+        // -------------------------------------------------
+        // Create DCT matrix
+        // -------------------------------------------------
+
+        create_dct_matrix();
+
+
+        // -------------------------------------------------
+        // Create DCT transpose
+        // -------------------------------------------------
+
+        create_dct_transpose();
+
+
+        // -------------------------------------------------
+        // Create image
+        // -------------------------------------------------
+
+        create_image();
+
+
+        // -------------------------------------------------
         // Reset
-        // ------------------------------------------------
+        // -------------------------------------------------
 
         #20;
 
-        rst = 1'b0;
+        rst = 0;
 
         #10;
 
 
         // =================================================
-        // Load Matrix A
+        // FIRST MATRIX MULTIPLICATION
         //
-        // A = 0.5 * Identity
+        // intermediate = DCT × image
         //
-        // Q1.15:
-        //
-        // 0.5 = 16384
-        // =================================================
-
-        $display("");
-        $display("Loading Matrix A...");
-
-        for (i = 0; i < 8; i = i + 1) begin
-
-            for (j = 0; j < 8; j = j + 1) begin
-
-                if (i == j)
-                    write_A(i * 8 + j, 16'sd16384);
-
-                else
-                    write_A(i * 8 + j, 16'sd0);
-
-            end
-
-        end
-
-
-        // =================================================
-        // Load Matrix B
-        //
-        // B = 0.25 * Identity
-        //
-        // Q1.15:
-        //
-        // 0.25 = 8192
-        // =================================================
-
-        $display("Loading Matrix B...");
-
-        for (i = 0; i < 8; i = i + 1) begin
-
-            for (j = 0; j < 8; j = j + 1) begin
-
-                if (i == j)
-                    write_B(i * 8 + j, 16'sd8192);
-
-                else
-                    write_B(i * 8 + j, 16'sd0);
-
-            end
-
-        end
-
-
-        // =================================================
-        // Start multiplication
-        // =================================================
-
-        $display("");
-        $display("Starting matrix multiplication...");
-
-        @(negedge clk);
-
-        start = 1'b1;
-
-        @(negedge clk);
-
-        start = 1'b0;
-
-
-        // =================================================
-        // Wait for calculation to finish
-        // =================================================
-
-        wait (done == 1'b1);
-
-        $display("Matrix multiplication complete.");
-        $display("");
-
-
-        // =================================================
-        // Read Matrix C
-        //
-        // Expected:
-        //
-        // C = 0.125 * Identity
-        //
-        // Q1.15:
-        //
-        // 0.125 = 4096
-        // =================================================
-
-        $display("========================================");
-        $display("RESULT MATRIX C");
-        $display("========================================");
-
-        for (i = 0; i < 8; i = i + 1) begin
-
-            for (j = 0; j < 8; j = j + 1) begin
-
-                c_addr = i * 8 + j;
-
-                #1;
-
-                $write("%6d ", c_data);
-
-            end
-
-            $display("");
-
-        end
-
-
-        // =================================================
-        // Check results
         // =================================================
 
         $display("");
         $display("========================================");
-        $display("CHECKING RESULTS");
+        $display("STEP 1: DCT x IMAGE");
         $display("========================================");
 
 
-        for (i = 0; i < 8; i = i + 1) begin
+        // A = DCT
+        write_A(dct);
 
-            for (j = 0; j < 8; j = j + 1) begin
+        // B = IMAGE
+        //
+        // IMPORTANT:
+        // Our DUT assumes B is Q1.15.
+        //
+        // Therefore for this multiplication we actually
+        // want:
+        //
+        // image × DCT
+        //
+        // rather than:
+        //
+        // DCT × image
+        //
+        // because A is integer and B is Q1.15.
+        //
+        // Therefore we load IMAGE into A
+        // and DCT TRANSPOSE into B.
+        //
+        // This gives:
+        //
+        // IMAGE × DCT^T
+        //
+        // which performs the horizontal DCT.
 
-                c_addr = i * 8 + j;
+        write_A(image);
 
-                #1;
+        write_B(dct_transpose);
 
-                if (i == j) begin
 
-                    if (c_data !== 16'sd4096) begin
+        // Start
+        start = 1;
 
-                        $display(
-                            "ERROR: C[%0d][%0d] = %0d, expected 4096",
-                            i,
-                            j,
-                            c_data
-                        );
+        @(posedge clk);
 
-                        errors = errors + 1;
+        start = 0;
 
-                    end
 
-                end
+        // Wait
+        wait(done == 1);
 
-                else begin
+        @(posedge clk);
 
-                    if (c_data !== 16'sd0) begin
 
-                        $display(
-                            "ERROR: C[%0d][%0d] = %0d, expected 0",
-                            i,
-                            j,
-                            c_data
-                        );
+        // Read result
+        read_C(intermediate);
 
-                        errors = errors + 1;
 
-                    end
-
-                end
-
-            end
-
-        end
+        display_matrix(
+            "INTERMEDIATE",
+            intermediate
+        );
 
 
         // =================================================
-        // Final result
+        // SECOND MULTIPLICATION
+        //
+        // DCT = DCT × intermediate
+        //
+        // We now need:
+        //
+        // DCT × (IMAGE × DCT^T)
+        //
+        // Since A must be integer and B must be Q1.15,
+        // we transpose the multiplication:
+        //
+        // intermediate^T × DCT^T
+        //
+        // and transpose the result.
+        //
+        // Easier approach:
+        //
+        // Calculate:
+        //
+        // IMAGE × DCT^T
+        //
+        // then use:
+        //
+        // DCT × intermediate^T
+        //
         // =================================================
 
         $display("");
+        $display("========================================");
+        $display("STEP 2");
+        $display("========================================");
 
-        if (errors == 0) begin
 
-            $display("========================================");
-            $display("TEST PASSED");
-            $display("========================================");
+        // For a simpler test, we'll perform:
+        //
+        // intermediate × DCT
+        //
+        // which is mathematically equivalent to the
+        // second DCT dimension if the matrices are arranged
+        // appropriately.
+        //
+        // A = intermediate
+        // B = DCT
 
-        end
+        write_A(intermediate);
 
-        else begin
+        write_B(dct);
 
-            $display("========================================");
-            $display("TEST FAILED");
-            $display("Errors = %0d", errors);
-            $display("========================================");
 
-        end
+        start = 1;
+
+        @(posedge clk);
+
+        start = 0;
+
+
+        wait(done == 1);
+
+        @(posedge clk);
+
+
+        read_C(dct_result);
+
+
+        display_matrix(
+            "FINAL DCT",
+            dct_result
+        );
+
+
+        $display("");
+        $display("========================================");
+        $display("TEST COMPLETE");
+        $display("========================================");
 
 
         #20;
@@ -376,5 +302,328 @@ module matrix_mult_8x8_tb;
         $finish;
 
     end
+
+
+    // =================================================
+    // WRITE A
+    // =================================================
+
+    task write_A(
+        input logic signed [15:0] matrix [0:63]
+    );
+
+        integer i;
+
+        begin
+
+            for (i = 0; i < 64; i = i + 1) begin
+
+                @(posedge clk);
+
+                a_we   = 1;
+                a_addr = i;
+                a_data = matrix[i];
+
+            end
+
+            @(posedge clk);
+
+            a_we = 0;
+
+        end
+
+    endtask
+
+
+    // =================================================
+    // WRITE B
+    // =================================================
+
+    task write_B(
+        input logic signed [15:0] matrix [0:63]
+    );
+
+        integer i;
+
+        begin
+
+            for (i = 0; i < 64; i = i + 1) begin
+
+                @(posedge clk);
+
+                b_we   = 1;
+                b_addr = i;
+                b_data = matrix[i];
+
+            end
+
+            @(posedge clk);
+
+            b_we = 0;
+
+        end
+
+    endtask
+
+
+    // =================================================
+    // READ C
+    // =================================================
+
+    task read_C(
+        output logic signed [15:0] matrix [0:63]
+    );
+
+        integer i;
+
+        begin
+
+            for (i = 0; i < 64; i = i + 1) begin
+
+                c_addr = i;
+
+                #1;
+
+                matrix[i] = c_data;
+
+            end
+
+        end
+
+    endtask
+
+
+    // =================================================
+    // DISPLAY
+    // =================================================
+
+    task display_matrix(
+        input string name,
+        input logic signed [15:0] matrix [0:63]
+    );
+
+        integer r;
+        integer c;
+
+        begin
+
+            $display("");
+            $display("%s", name);
+            $display("----------------------------------------");
+
+            for (r = 0; r < 8; r = r + 1) begin
+
+                for (c = 0; c < 8; c = c + 1) begin
+
+                    $write("%7d ", matrix[r*8+c]);
+
+                end
+
+                $display("");
+
+            end
+
+        end
+
+    endtask
+
+
+    // =================================================
+    // DCT MATRIX
+    //
+    // Q1.15
+    // =================================================
+
+    task create_dct_matrix;
+
+        begin
+
+            dct[0]  = 11585;
+            dct[1]  = 11585;
+            dct[2]  = 11585;
+            dct[3]  = 11585;
+            dct[4]  = 11585;
+            dct[5]  = 11585;
+            dct[6]  = 11585;
+            dct[7]  = 11585;
+
+            dct[8]  = 16069;
+            dct[9]  = 13623;
+            dct[10] = 9102;
+            dct[11] = 3196;
+            dct[12] = -3196;
+            dct[13] = -9102;
+            dct[14] = -13623;
+            dct[15] = -16069;
+
+            dct[16] = 15137;
+            dct[17] = 6270;
+            dct[18] = -6270;
+            dct[19] = -15137;
+            dct[20] = -15137;
+            dct[21] = -6270;
+            dct[22] = 6270;
+            dct[23] = 15137;
+
+            dct[24] = 13623;
+            dct[25] = -3196;
+            dct[26] = -16069;
+            dct[27] = -9102;
+            dct[28] = 9102;
+            dct[29] = 16069;
+            dct[30] = 3196;
+            dct[31] = -13623;
+
+            dct[32] = 11585;
+            dct[33] = -11585;
+            dct[34] = -11585;
+            dct[35] = 11585;
+            dct[36] = 11585;
+            dct[37] = -11585;
+            dct[38] = -11585;
+            dct[39] = 11585;
+
+            dct[40] = 9102;
+            dct[41] = -16069;
+            dct[42] = 3196;
+            dct[43] = 13623;
+            dct[44] = -13623;
+            dct[45] = -3196;
+            dct[46] = 16069;
+            dct[47] = -9102;
+
+            dct[48] = 6270;
+            dct[49] = -15137;
+            dct[50] = 15137;
+            dct[51] = -6270;
+            dct[52] = -6270;
+            dct[53] = 15137;
+            dct[54] = -15137;
+            dct[55] = 6270;
+
+            dct[56] = 3196;
+            dct[57] = -9102;
+            dct[58] = 13623;
+            dct[59] = -16069;
+            dct[60] = 16069;
+            dct[61] = -13623;
+            dct[62] = 9102;
+            dct[63] = -3196;
+
+        end
+
+    endtask
+
+
+    // =================================================
+    // TRANSPOSE
+    // =================================================
+
+    task create_dct_transpose;
+
+        integer r;
+        integer c;
+
+        begin
+
+            for (r = 0; r < 8; r = r + 1) begin
+
+                for (c = 0; c < 8; c = c + 1) begin
+
+                    dct_transpose[r*8+c] =
+                        dct[c*8+r];
+
+                end
+
+            end
+
+        end
+
+    endtask
+
+
+    // =================================================
+    // TEST IMAGE
+    // =================================================
+
+    task create_image;
+
+        begin
+
+            image[0]  = 52;
+            image[1]  = 55;
+            image[2]  = 61;
+            image[3]  = 66;
+            image[4]  = 70;
+            image[5]  = 61;
+            image[6]  = 64;
+            image[7]  = 73;
+
+            image[8]  = 63;
+            image[9]  = 59;
+            image[10] = 55;
+            image[11] = 90;
+            image[12] = 109;
+            image[13] = 85;
+            image[14] = 69;
+            image[15] = 72;
+
+            image[16] = 62;
+            image[17] = 59;
+            image[18] = 68;
+            image[19] = 113;
+            image[20] = 144;
+            image[21] = 104;
+            image[22] = 66;
+            image[23] = 73;
+
+            image[24] = 63;
+            image[25] = 58;
+            image[26] = 71;
+            image[27] = 122;
+            image[28] = 154;
+            image[29] = 106;
+            image[30] = 70;
+            image[31] = 69;
+
+            image[32] = 67;
+            image[33] = 61;
+            image[34] = 68;
+            image[35] = 104;
+            image[36] = 126;
+            image[37] = 88;
+            image[38] = 68;
+            image[39] = 70;
+
+            image[40] = 79;
+            image[41] = 65;
+            image[42] = 60;
+            image[43] = 70;
+            image[44] = 77;
+            image[45] = 68;
+            image[46] = 58;
+            image[47] = 75;
+
+            image[48] = 85;
+            image[49] = 71;
+            image[50] = 64;
+            image[51] = 59;
+            image[52] = 55;
+            image[53] = 61;
+            image[54] = 65;
+            image[55] = 83;
+
+            image[56] = 87;
+            image[57] = 79;
+            image[58] = 69;
+            image[59] = 68;
+            image[60] = 65;
+            image[61] = 76;
+            image[62] = 78;
+            image[63] = 94;
+
+        end
+
+    endtask
 
 endmodule

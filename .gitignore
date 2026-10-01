@@ -18,3 +18,6 @@ FPGA/boards/DE1-SOC/simulation/modelsim/Image-Processing.sft
 FPGA/boards/DE1-SOC/simulation/modelsim/Image-Processing.svo
 FPGA/boards/DE1-SOC/simulation/modelsim/Image-Processing_modelsim.xrf
 FPGA/simulation/vsim.wlf
+
+# Personal Planning
+planning.txt
