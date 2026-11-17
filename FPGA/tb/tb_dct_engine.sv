@@ -172,7 +172,7 @@ module tb_dct_engine;
         void'($value$plusargs("stall_out=%d", stall_out));
         void'($value$plusargs("logdir=%s", logdir));
         nblocks = dpi_test_block_count(nrand);
-        timeout = longint'(nblocks) * (IN_BEATS + OUT_BEATS + 2 * 512 / LANES + 16) * 20 + 1000;
+        timeout = longint'(nblocks * (IN_BEATS + OUT_BEATS + 1024 / LANES + 16) * 20 + 1000);
 
         $display("tb_dct_engine: LANES=%0d DATA_WIDTH=%0d scale=%0d seed=%0d blocks=%0d stall %0d%%/%0d%%",
                  LANES, DATA_WIDTH, scale, seed, nblocks, stall_in, stall_out);

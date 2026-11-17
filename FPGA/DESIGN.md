@@ -2,8 +2,9 @@
 
 SystemVerilog for the accelerator, its Verilator testbenches, and (later) the Platform Designer / Quartus files.
 
-- **Phase 2 (this document):** `dct_engine`, one DCT + quantizer engine.
-- Phase 3 adds `dct_array` (several engines), phase 4 `dct_accel` (registers and data-path feeders).
+- **Phase 2:** `dct_engine`, one DCT + quantizer engine (sections 2–7).
+- **Phase 3:** `dct_array`, several engines behind one stream (section 8).
+- Phase 4 adds `dct_accel` (registers and data-path feeders).
 
 ---
 
@@ -166,11 +167,77 @@ Lint: `verilator --lint-only -Wall` on the RTL must be clean.
 
 ---
 
-## 8. Build and test
+### Results (phase 2)
+
+All runs pass, bit-exact: 279 blocks per run, `LANES = 1` and `8`, seeds 1–3 with backpressure plus a timing run. Measured without backpressure: **152 cycles/block at `LANES = 8`**, 1048 at `LANES = 1`, exactly as calculated. Details in `docs/logs/sim.md`.
+
+---
+
+## 8. `dct_array` (phase 3)
+
+`NUM_ENGINES` copies of `dct_engine` behind the same stream interface, so it is a drop-in replacement for one engine.
 
 ```
-make lint        # strict lint of dct_engine
-make sim         # lint + LANES=1 and LANES=8, seeds 1 2 3, plus one timing run each
+                         ┌──────────────┐
+                    ┌───►│  engine 0    │───┐
+ in stream          │    └──────────────┘   │          out stream
+ ──────► distributor├───►│  engine 1    │───┤collector ──────►
+         (in_sel)   │    └──────────────┘   │(out_sel)
+                    └───►│  engine N-1  │───┘
+                         └──────────────┘
+          q_we / q_addr / q_data ──► broadcast to every engine
+```
+
+### How it works
+
+| Part | Behaviour |
+|---|---|
+| Distributor | `in_sel` points at the engine receiving the current block. `in_valid` goes only to that engine; `in_ready` comes from it. After a whole block (8 beats at 64-bit) `in_sel` moves to the next engine. |
+| Collector | `out_sel` points at the engine whose block is next in order. Only that engine's output is passed through. After the beat with `eop`, `out_sel` moves on. |
+| Q table | Written to all engines at once. |
+| `busy` | Any engine busy, or a block partly received. |
+
+**Why the order is always right:** block *i* goes to engine *i mod N*, and the collector reads engines in the same order. Every block takes exactly the same number of cycles and each engine holds one block at a time, so engine *i mod N* always finishes block *i* before it can accept block *i + N*. No tags or reorder buffer are needed.
+
+### Expected throughput (`LANES = 8`, `DATA_WIDTH = 64`, no backpressure)
+
+Each engine needs 152 cycles per block; N engines work in parallel, but the shared output stream needs 16 beats per block.
+
+| `NUM_ENGINES` | Cycles per block | Limited by |
+|---|---|---|
+| 1 | 152 | engine |
+| 2 | ~76 | engines |
+| 4 | ~38 | engines |
+| 8 | ~19 | engines |
+| 10+ | 16 | output stream (64-bit) |
+
+Above about 9 engines a 64-bit stream is the limit; a wider `DATA_WIDTH` would be needed. On the board, the HPS/DMA transfer rate will probably limit earlier, which is what the engine sweep (phase 10) measures.
+
+### Design decisions
+
+| Decision | Reasoning | Alternative rejected |
+|---|---|---|
+| **Round-robin, whole blocks** | Simplest possible distributor; order is preserved for free because all blocks take the same time. | First-free with tags + reorder buffer: needed only if block times varied |
+| **Same interface as one engine** | `dct_accel` (phase 4) and the testbench treat 1 or N engines identically. | A different interface for the array |
+| **Broadcast Q table** | One write reaches every engine; each engine reads its own copy without contention. | One shared table with N read ports |
+| **Muxes, not a bus** | `in_ready` / `out_*` are simple selects on a small index; cheap and fast at 50 MHz. | Arbitration logic |
+
+### Verification (`tb/tb_dct_array.sv`)
+
+Same approach as the engine testbench (C reference through DPI-C, random backpressure, random initial values, several seeds, automatic logging), plus:
+
+- Output block *n* must equal input block *n*: this checks the order.
+- On a mismatch it reports which engine processed the block and whether the beat matches a neighbouring block instead (which would mean blocks came out of order).
+- Runs `NUM_ENGINES` = 1, 2, 4, each with a timing run, to show throughput scaling.
+
+---
+
+## 9. Build and test
+
+```
+make lint        # strict lint of dct_engine and dct_array
+make sim         # lint + engine (LANES=1, 8) + array (NUM_ENGINES=1, 2, 4), seeds 1 2 3 + timing runs
 make -C FPGA/sim engine LANES_LIST=8 SEEDS="4 5 6 7"     # more seeds
+make -C FPGA/sim array ENGINES_LIST="8"                  # 8 engines
 make -C FPGA/sim engine SCALE=8                          # another Q scale
 ```

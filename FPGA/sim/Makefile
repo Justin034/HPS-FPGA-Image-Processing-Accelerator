@@ -1,12 +1,14 @@
 # FPGA/sim/Makefile - Verilator lint + simulation.
 #
-#   make                lint, then engine tests (all LANES values x all seeds + one timing run)
+#   make                lint, engine tests, array tests (all seeds + one timing run each)
 #   make lint           strict lint of the RTL (-Wall)
 #   make engine         engine tests only
+#   make array          array tests only
 #   make clean
 #
 # Options (override on the command line):
-#   LANES_LIST="1 8"    LANES values to test
+#   LANES_LIST="1 8"    LANES values to test (engine)
+#   ENGINES_LIST="1 2 4" NUM_ENGINES values to test (array, LANES=8)
 #   SEEDS="1 2 3"       random seeds (backpressure + random initial register values)
 #   NRAND=200           random blocks after the 79 edge cases
 #   SCALE=1             Q table scale
@@ -23,6 +25,7 @@ BUILD     := build
 
 VERILATOR ?= verilator
 LANES_LIST ?= 1 8
+ENGINES_LIST ?= 1 2 4
 SEEDS     ?= 1 2 3
 NRAND     ?= 200
 SCALE     ?= 1
@@ -39,13 +42,15 @@ VFLAGS    := --binary --timing -Wno-fatal --x-assign unique --x-initial unique \
 RUNFLAGS  := +verilator+rand+reset+2 +nrand=$(NRAND) +scale=$(SCALE) +logdir=$(LOGDIR)
 
 ENGINE_RTL := $(RTL)/dct_engine.sv
+ARRAY_RTL  := $(RTL)/dct_engine.sv $(RTL)/dct_array.sv
 
-.PHONY: all lint engine clean
+.PHONY: all lint engine array clean
 
-all: lint engine
+all: lint engine array
 
 lint:
 	$(VERILATOR) --lint-only -Wall --top-module dct_engine $(ENGINE_RTL)
+	$(VERILATOR) --lint-only -Wall --top-module dct_array $(ARRAY_RTL)
 	@echo "lint: OK"
 
 engine: $(foreach L,$(LANES_LIST),engine_L$(L))
@@ -59,6 +64,16 @@ engine_L%: $(ENGINE_RTL) $(TB)/tb_dct_engine.sv $(REF_C)
 	    ./$(BUILD)/engine_L$*/tb +verilator+seed+$$s +seed=$$s $(RUNFLAGS) || exit 1; \
 	done
 	./$(BUILD)/engine_L$*/tb +verilator+seed+1 +seed=1 +stall_in=0 +stall_out=0 $(RUNFLAGS)
+
+array: $(foreach N,$(ENGINES_LIST),array_N$(N))
+
+array_N%: $(ARRAY_RTL) $(TB)/tb_dct_array.sv $(REF_C)
+	$(VERILATOR) $(VFLAGS) -GNUM_ENGINES=$* --top-module tb_dct_array --Mdir $(BUILD)/array_N$* \
+	    -o tb $(TB)/tb_dct_array.sv $(ARRAY_RTL) $(REF_C)
+	@for s in $(SEEDS); do \
+	    ./$(BUILD)/array_N$*/tb +verilator+seed+$$s +seed=$$s $(RUNFLAGS) || exit 1; \
+	done
+	./$(BUILD)/array_N$*/tb +verilator+seed+1 +seed=1 +stall_in=0 +stall_out=0 $(RUNFLAGS)
 
 clean:
 	rm -rf $(BUILD)
