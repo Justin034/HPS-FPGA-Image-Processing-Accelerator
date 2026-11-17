@@ -1,23 +1,122 @@
-# Misc. folders and files
-.vscode
-*.exe
-*.bmp
+# =====================================================================
+#  HPS-FPGA Image Processing Accelerator — .gitignore
+# =====================================================================
+
+# ---------------------------------------------------------------------
+# Images
+#   Ignored everywhere except:
+#     - small test images directly in test_images/
+#     - figures in docs/ (for the results document)
+#   Large test images go in test_images/large/ (never committed).
+# ---------------------------------------------------------------------
 *.png
+*.bmp
+*.jpg
+*.jpeg
+!test_images/*.png
+!test_images/*.bmp
+!docs/**/*.png
+test_images/large/
 
-# FPGA
-db
-*.bak
-incremental_db
-output_files
-work
+# ---------------------------------------------------------------------
+# Program outputs (coefficient files, decoded images, timing logs)
+#   Results worth keeping are copied by hand into docs/results.md.
+# ---------------------------------------------------------------------
+out/
+*.dctq
+
+# ---------------------------------------------------------------------
+# Simulation (Linux): Verilator, Icarus, Yosys, waveforms
+# ---------------------------------------------------------------------
+FPGA/sim/build/
+FPGA/sim/vectors/
+obj_dir/
+*.vvp
+*.vcd
+*.fst
+*.ghw
+
+# ---------------------------------------------------------------------
+# ModelSim / Questa (Windows, optional)
+# ---------------------------------------------------------------------
+work/
+transcript
+*.wlf
 modelsim.ini
-FPGA/boards/DE1-SOC/c5_pin_model_dump.txt
 
-# FPGA Simulation
-FPGA/boards/DE1-SOC/simulation/modelsim/Image-Processing.sft
-FPGA/boards/DE1-SOC/simulation/modelsim/Image-Processing.svo
-FPGA/boards/DE1-SOC/simulation/modelsim/Image-Processing_modelsim.xrf
-FPGA/simulation/vsim.wlf
+# ---------------------------------------------------------------------
+# Quartus / Platform Designer (Windows)
+#   Source files (.qpf, .qsf, .sdc, .qsys, .qip, .v/.sv, _hw.tcl) are kept;
+#   everything Quartus regenerates is ignored.
+# ---------------------------------------------------------------------
+db/
+incremental_db/
+output_files/
+greybox_tmp/
+qdb/
+tmp-clearbox/
+.qsys_edit/
+hc_output/
+hps_isw_handoff/
+*.qws
+*.qdf
+*.qarlog
+*.rpt
+*.summary
+*.smsg
+*.jdi
+*.pin
+*.sld
+*.done
+*.sof
+*.pof
+*.rbf
+*.sopcinfo
+*.bak
+c5_pin_model_dump.txt
+PLLJ_PLLSPE_INFO.txt
+# Platform Designer generated output folders (one per system, e.g. Computer_System/)
+FPGA/system/*/synthesis/
+FPGA/system/*/simulation/
+FPGA/system/*/testbench/
 
-# Personal Planning
+# ---------------------------------------------------------------------
+# C (HPS code)
+# ---------------------------------------------------------------------
+HPS/build/
+*.o
+*.d
+*.a
+*.so
+*.out
+*.exe
+
+# ---------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------
+__pycache__/
+*.pyc
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# ---------------------------------------------------------------------
+# Editors and operating systems
+# ---------------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---------------------------------------------------------------------
+# Claude Code (personal local settings only)
+# ---------------------------------------------------------------------
+.claude/settings.local.json
+
+# ---------------------------------------------------------------------
+# Personal notes
+# ---------------------------------------------------------------------
 planning.txt
