@@ -23,9 +23,12 @@ Run before every commit and before going to Windows.
 | A6 | `make lint` | Strict Verilator lint of all RTL (`dct_engine`, `dct_array`, `dct_accel`) | `lint: OK`, no warnings | — | ✅ |
 | A7 | `make sim` | Engine (`LANES` 1, 8), array (`NUM_ENGINES` 1, 2, 4), accelerator modes 0/1/2 (`NUM_ENGINES` 1, 2), seeds 1–3 + timing runs | Every run `PASS`; array ~152 / 76 / 38 cycles/block; accel ~152 / 76 | `docs/logs/sim.md` | ✅ |
 | A8 | `make synth` | Yosys: `dct_accel` synthesises (generic cells, small buffers) | `synth: OK`; cell counts in `FPGA/sim/build/synth_stat.txt` | — | ✅ |
-| A9 | `make -C HPS native` then `./HPS/build/dctq selftest` | `dctq` builds natively | `SELFTEST PASSED` | `docs/logs/tests.md` | 🔜 P5 |
-| A10 | `./HPS/build/dctq blocktest --mode sw` | Software path on all test blocks | `PASS` | `docs/logs/tests.md` | 🔜 P5 |
-| A11 | `./HPS/build/dctq run out/<img>_256x256.bmp --mode sw --runs 10 --recon out/recon_sw.bmp` | Full software run with timing + PSNR | Result line printed; PSNR matches A5 at ×1 | `docs/logs/runs.md` | 🔜 P5 |
+| A9 | `make -C HPS native` then `./HPS/build/dctq selftest --log docs/logs` | `dctq` builds natively (no warnings) | `SELFTEST PASSED: 13/13` | `docs/logs/tests.md` | ✅ |
+| A10 | `./HPS/build/dctq blocktest --mode sw --log docs/logs` | Software path on all test blocks | `BLOCKTEST PASSED: 279 blocks, 0 bad` | `docs/logs/tests.md` | ✅ |
+| A11 | `./HPS/build/dctq run out/<img>_256x256.bmp --mode sw --runs 10 --recon out/recon_sw.bmp --log docs/logs` | Full software run with timing + PSNR | Result printed; PSNR equals A5 at ×1; `out/recon_sw.bmp` looks right | `docs/logs/runs.md`, `quality.md` | ✅ |
+| A12 | `./HPS/build/dctq blocktest --mode reg --no-log` | Hardware modes fail cleanly on the PC | Prints "hardware not available in this build (PC)", exit code 1, no crash | — | ✅ |
+
+On the PC always pass `--log docs/logs`; without it `dctq` writes to `./results/` (its board default, ignored by git).
 
 Optional extra coverage:
 ```
@@ -50,7 +53,7 @@ git add -A && git commit -m "<message>"
 |---|---|---|---|
 | B1 | Get the repository onto Windows | `git pull` (or copy the folder) | Same commit as stage A |
 | B2 | Create the Quartus project | `quartus_sh -t FPGA/quartus/create_project.tcl` | Project created, RTL files listed |
-| B3 | Add the accelerator to the DE1-SoC Computer | Platform Designer: add `dct_accel` (from `FPGA/ip/dct_accel_hw.tcl`); registers → lightweight bridge, buffer → main HPS-to-FPGA bridge; Generate HDL | Generation without errors; note the base addresses |
+| B3 | Add the accelerator to the DE1-SoC Computer | Platform Designer: add `dct_accel` (from `FPGA/ip/dct_accel_hw.tcl`); registers → lightweight bridge at base `0x0001_0000` (HPS sees `0xFF210000`), buffer → main HPS-to-FPGA bridge at base `0x0400_0000` (HPS sees `0xC4000000`); Generate HDL | Generation without errors; addresses as listed (they are `dctq`'s defaults; otherwise use `--csr`/`--buf`) |
 | B4 | Compile | `quartus_sh --flow compile <project>` | No errors; timing met at 50 MHz |
 | B5 | Record resources and timing | Runs automatically after compile (`FPGA/quartus/report_summary.tcl`) | Row added to `docs/logs/quartus.md` |
 | B6 | First compile only | Copy the DE1-SoC Computer `.qsys`, `.qsf`, top-level Verilog into `FPGA/system/` | Files committed |
@@ -69,8 +72,16 @@ Run in a shell on the board (serial console or SSH). Record results in `docs/res
 | C1 | `gcc --version` and `make --version` | Compiler on the board | Both print a version (else cross-compile, see `idea.md` §10) |
 | C2 | `whoami` | Root for `/dev/mem` | `root` (or use `sudo`) |
 | C3 | `df -h` | Space for images | A few hundred MB free |
-| C4 | From the PC: `scp -r HPS out/*.bmp root@<board-ip>:~/dct/` | File transfer | Files arrive (else SD card / USB) |
-| C5 | `cd ~/dct/HPS && make board` | Build `dctq` on the board | `build/dctq` created, no warnings — 🔜 P5 |
+| C4 | From the PC: `scp -r HPS out/*.bmp root@<board-ip>:~/dct/` | File transfer | Files arrive (else SD card / USB). Delete any copied `HPS/build/` on the board first: PC objects don't run on ARM |
+| C5 | `cd ~/dct/HPS && make board` — or, without `make`, the `gcc` command below | Build `dctq` on the board | `build/dctq` created, no warnings |
+
+Building without `make` (in `~/dct/HPS`):
+```
+rm -rf build && mkdir -p build && gcc -O2 -Wall -Wextra -std=c11 -Iinclude \
+    src/main.c src/fpga.c src/timing.c src/dct_ref.c src/test_blocks.c \
+    src/image.c src/quality.c src/ref_selftest.c src/reslog.c -o build/dctq -lm
+```
+On the board `fpga.c` compiles its real hardware layer automatically (ARM). `dctq` needs root for `/dev/mem` in every hardware command; `selftest` and `--mode sw` don't.
 
 ---
 
@@ -81,9 +92,12 @@ After programming the FPGA (B7), on the board in `~/dct/HPS`. Every command appe
 ### D1 — Hardware link and software baseline (every new FPGA build)
 | # | Command | Checks | Pass when | Status |
 |---|---|---|---|---|
-| D1.1 | `./build/dctq selftest` | C reference on the ARM | `SELFTEST PASSED` | 🔜 P5 |
-| D1.2 | `./build/dctq hwcheck` | Bridges, LEDs, register read/write, `INFO`, `Q_TABLE` readback | `PASS`; `INFO` shows the expected `NUM_ENGINES` | 🔜 P5 |
-| D1.3 | `./build/dctq run ../<img>_256x256.bmp --mode sw --runs 10` | Software baseline timing on the board | Result line; PSNR as on the PC | 🔜 P5 |
+| D1.0 | `devmem 0xFF200000 32 0x3FF` | Bridges alive (idea.md §10, stage 1) | All 10 red LEDs on. **Do this first:** a dead bridge can freeze the board on `hwcheck` | ✅ |
+| D1.1 | `./build/dctq selftest` | C reference on the ARM | `SELFTEST PASSED: 13/13` | ✅ |
+| D1.2 | `./build/dctq hwcheck` | `MAGIC`, `INFO`, `SCRATCH`, `Q_TABLE`, `SOFT_RESET`, `ERROR`, buffer (with MB/s), 1 block mode reg, 4 blocks mode buf | `HWCHECK PASSED: 9/9`; `INFO` shows the expected `NUM_ENGINES` | ✅ |
+| D1.3 | `./build/dctq run ../<img>_256x256.bmp --mode sw --runs 10` | Software baseline timing on the board | Result printed; PSNR as on the PC | ✅ |
+
+If `hwcheck` stops at `MAGIC`, the accelerator isn't at `0xFF210000`: check the address in Platform Designer, or pass `--csr ADDR --buf ADDR` with the addresses it assigned.
 
 ### D2 — Option 1: register mode (phase 7)
 ```

@@ -72,6 +72,8 @@ Shell checks done once on the board; later stages are covered by `dctq hwcheck` 
 - The reciprocal-multiply quantizer can differ from exact division by ±1 in rare cases (the C reference uses the same formula, so results are bit-exact with it).
 - Grayscale only; colour not processed.
 - The software baseline uses the same matrix algorithm as the FPGA, not a fast DCT.
+- Option 2's buffer (64 KB in + 128 KB out, 1024 blocks) holds at most a 256×256 image. Whether it fits next to the DE1-SoC Computer's own memories is confirmed only by the Quartus fit (phase 6).
+- In option 2, the input buffer can't be read back while a job is running (its read port belongs to the engines then).
 - *(add others found during testing)*
 
 ---
@@ -80,4 +82,4 @@ Shell checks done once on the board; later stages are covered by `dctq hwcheck` 
 
 | Date | Phase | Problem | Fix |
 |---|---|---|---|
-| | | | |
+| 2026-11-20 | 4 (`dct_accel` sim) | All 8 first `dct_accel` runs FAIL with `2 errors`, no bad blocks, ~3,500 cycles/block in mode 2: the job never reached `DONE`. Testbench bug: the mode-2 output monitor dropped `aso_ready` before the rising edge of the last transfer, so the accelerator never saw its last beat accepted. RTL was correct. | Monitor holds `aso_ready` one more cycle after the last beat. All runs PASS. Details in `FPGA/DESIGN.md` §10. The FAIL rows remain in `logs/sim.md` as a record. |

@@ -2,8 +2,8 @@
 
 C code that runs on the HPS (ARM Cortex-A9, Linux) and, for testing, natively on the Linux PC.
 
-- **Phase 1 (this document):** the C reference library: arithmetic, test blocks, image handling, reconstruction/PSNR, self-test and automatic result logging.
-- **Phase 5 (added later):** the `dctq` program and the FPGA hardware layer.
+- **Phase 1 (sections 1–7):** the C reference library: arithmetic, test blocks, image handling, reconstruction/PSNR, self-test and automatic result logging.
+- **Phase 5 (section 8):** the `dctq` program and the FPGA hardware layer.
 
 ---
 
@@ -120,6 +120,10 @@ C code that runs on the HPS (ARM Cortex-A9, Linux) and, for testing, natively on
 | `include/ref_selftest.h`, `src/ref_selftest.c` | `ref_selftest()`: 13 checks, PASS/FAIL per check, summary for the log |
 | `include/reslog.h`, `src/reslog.c` | `reslog_set_dir`, `reslog_append`, `reslog_timestamp`, `reslog_host`; tables `RESLOG_TESTS`, `RESLOG_RUNS`, `RESLOG_QUALITY` |
 | `tests/test_ref.c` | PC test program: self-test + optional image PSNR at ×1/×2/×4/×8 |
+| `src/main.c` | `dctq`: commands `selftest`, `hwcheck`, `blocktest`, `run` (phase 5, section 8) |
+| `include/fpga.h`, `src/fpga.c` | Hardware layer through `/dev/mem` on the board; stubs on the PC (phase 5) |
+| `include/accel_regs.h` | `dct_accel` register map and default addresses (mirrors `FPGA/DESIGN.md` §10) |
+| `include/timing.h`, `src/timing.c` | `timing_now` (`CLOCK_MONOTONIC`), `timing_median` |
 
 ### Test blocks
 
@@ -167,3 +171,140 @@ make c IMG=out/<image>_256x256.bmp      # + PSNR at x1/x2/x4/x8 → docs/logs/qu
                                         #   reconstructed images out/recon_<image>_s<scale>.bmp
 ```
 Flags: `-O2 -Wall -Wextra -std=c11`, linked with `-lm`. The same sources build on the board in phase 5.
+
+---
+
+## 8. `dctq` (phase 5)
+
+One command-line program for the board. It uses the reference library from sections 1–7 for the software path and for checking, and `fpga.c` for the hardware.
+
+```
+                          dctq (main.c)
+   ┌─────────────────────────────────────────────────────────────────────┐
+   │  selftest ── ref_selftest.c                                         │
+   │  hwcheck ─── fpga.c: MAGIC, INFO, SCRATCH, Q_TABLE, SOFT_RESET,     │
+   │              ERROR, buffer, 1 block mode reg, 4 blocks mode buf     │
+   │  blocktest ─ test_blocks.c ──► sw / FPGA ──► compare with dct_ref.c │
+   │  run IMG ─── image.c (preprocess) ──► sw / FPGA ──► compare          │
+   │              ──► quality.c (reconstruct, PSNR) ──► result line       │
+   │                                                                     │
+   │  every command ──► reslog.c ──► results/{tests,runs,quality}.md/.csv │
+   └─────────────────────────────────────────────────────────────────────┘
+                 │ fpga.c (board)                 │ fpga.c (PC: stubs)
+                 ▼                                ▼
+     /dev/mem ── registers 0xFF210000      "hardware not available";
+              └─ buffer    0xC4000000       only --mode sw works
+```
+
+### Commands
+
+| Command | Does | Logs to |
+|---|---|---|
+| `selftest` | The 13 reference checks (section 6), now on the ARM | `tests` |
+| `hwcheck` | Nine accelerator checks (below), plus buffer copy speed | `tests` |
+| `blocktest --mode M` | All test blocks (79 edge + `--nrand` random, default 200) through mode M; every coefficient compared with `dct_ref_block` | `tests` |
+| `run IMG --mode M` | Timed runs on an image; match against software; PSNR; optional `--recon` BMP | `runs`, `quality` |
+
+Options: `--mode sw|reg|buf|dma`, `--scale 1|2|4|8`, `--runs N` (default 10), `--recon F.bmp`, `--nrand N`, `--log DIR` (default `results`), `--no-log`, `--tmp DIR`, `--csr ADDR`, `--buf ADDR`. Exit code 0 = pass, 1 = fail, 2 = usage error.
+
+### Modes
+
+| `--mode` | Path | Accelerator `MODE` | How one image is processed |
+|---|---|---|---|
+| `sw` | ARM, `dct_ref_blocks` | — | One call for all blocks |
+| `reg` | Option 1 | 0 | Per block: 64 writes to `IN_BLOCK`, `START`, poll, 64 reads from `OUT_BLOCK` |
+| `buf` | Option 2 | 1 | Per chunk of up to `BUF_BLOCKS` blocks: copy in, `START`, poll, copy out |
+| `dma` | Options 3/4 | 2 | Not built yet: prints a message (written in phase 9 with the mSGDMA) |
+
+### What `run` measures
+
+```
+ one run:  preprocess ──► transfer in ──► compute ──► transfer out
+           (image.c)      (copy / regs)   START..DONE  (copy / regs)
+```
+
+| Column | `sw` | `reg` | `buf` |
+|---|---|---|---|
+| Preprocess | BMP data → gray → pad → block order | same | same |
+| Transfer | 0 | whole loop minus compute | copy-in + copy-out time |
+| Compute | `dct_ref_blocks` | sum over blocks of `START` → `DONE` seen | sum over chunks of `START` → `DONE` seen |
+| Total | preprocess + compute | wall time of the whole run | wall time of the whole run |
+| Cycles | — | sum of `CYCLE_COUNT` | sum of `CYCLE_COUNT` |
+
+- **Compute is measured the same way in every FPGA mode:** wall time from writing `START` to seeing `DONE`. It includes polling overhead. `Cycles` is the pure hardware time (÷ 50 MHz), so the difference shows the cost of polling over the bridge.
+- **Every run also times the software path**, so `SW total` and `Speedup` (= SW total ÷ total) come from the same program, image and moment.
+- **Match:** the FPGA's coefficients for the whole image are compared with the software's. `YES`, or `NO (k of n blocks)`.
+- **PSNR** is computed from the coefficients the selected mode produced, so a wrong FPGA result also shows as a PSNR change.
+- **Timing method:** one warm-up run, then `--runs` timed runs; each column is the median over the runs. The median ignores runs disturbed by other Linux activity.
+
+### `hwcheck`
+
+| # | Check | Pass when |
+|---|---|---|
+| 1 | `MAGIC` | reads `0x44435431`. If not, stops here with a hint (FPGA not programmed, bridges off, or wrong address) |
+| 2 | `INFO` | version 1, ≥ 1 engine, ≥ 1 lane, data width 64; printed |
+| 3 | `SCRATCH` | 6 patterns + 32 walking ones read back |
+| 4 | `Q_TABLE` | a 17-bit pattern and then the real ×1 table read back (128 reads) |
+| 5 | `SOFT_RESET` | `STATUS` = 0 afterwards |
+| 6 | `ERROR` | `START` with `NUM_BLOCKS` = 0 in mode 1 gives `ERROR` only; `SOFT_RESET` clears it |
+| 7 | Buffer | the whole input region written and read back; copy speed in MB/s printed and logged |
+| 8 | Mode `reg` | the JPEG example block matches the reference |
+| 9 | Mode `buf` | 4 random blocks match the reference |
+
+A dead bridge can freeze the board on the first read; software can't catch that. The `devmem` LED test (`idea.md` §10, stage 1) comes first for that reason.
+
+### Hardware layer (`fpga.c`)
+
+| Function | Does |
+|---|---|
+| `fpga_open` / `fpga_close` | Open `/dev/mem` with `O_SYNC` (uncached), map 1 KB of registers and the 256 KB buffer window; read `INFO`, `BUF_BLOCKS` |
+| `fpga_rd` / `fpga_wr` | One 32-bit register access |
+| `fpga_buf_write` / `fpga_buf_read` | Copy to/from the buffer with 32-bit accesses |
+| `fpga_soft_reset`, `fpga_load_qtable`, `fpga_start` | As named |
+| `fpga_wait` | Poll `STATUS` until `BUSY` clears; after 1 s: `SOFT_RESET`, return timeout |
+| `fpga_reg_block` | One whole mode-0 block, returning its `START`→`DONE` time and `CYCLE_COUNT` |
+
+### Design decisions
+
+| Decision | Reasoning | Alternative rejected |
+|---|---|---|
+| **One program, four commands** | One binary to copy and build on the board; the commands are the bring-up order. | Separate test programs |
+| **Hardware layer and stubs in one `fpga.c`, chosen by `__arm__`** | The same file list builds on the PC and the board with one plain `gcc` command, which matters if the board has no `make`. On the PC, `--mode sw` and the tests run; hardware modes fail cleanly. | A separate stub file: the board and PC builds would need different file lists |
+| **Default addresses `0xFF210000` / `0xC4000000`, overridable** | Platform Designer is set to match (phase 6). `--csr`/`--buf` handle a different assignment without recompiling. | Hard-coded addresses only; reading them from a device tree (more setup) |
+| **`_FILE_OFFSET_BITS 64` for `mmap`** | Addresses above 2 GB (`0xC4000000`, `0xFF210000`) would be negative in a 32-bit `off_t`. | Relying on 32-bit wrap-around |
+| **32-bit copy loops instead of `memcpy`** | `memcpy` may use unaligned or multi-register accesses, which uncached device memory on ARM may reject (bus error). 32-bit accesses always work; the bridge's byte enables handle the 64-bit slave. Phase 8 can try wider accesses if the copy speed limits option 2. | `memcpy`: possibly faster, risk of `SIGBUS` |
+| **Output coefficients read straight into `int16_t` arrays** | The accelerator packs 4 `int16` per 64-bit word, first in the lowest bits; on the little-endian ARM that is exactly an `int16_t` array. No unpacking. | Unpacking word by word |
+| **Accelerator checked before every hardware command** | `blocktest` and `run` read `MAGIC` and `INFO` and do a `SOFT_RESET` first, so a wrong address or a left-over job is reported at once. | Trusting the state |
+| **Software path in every `run`** | Speedup and match come from the same process and image; no second command needed. | Separate `sw` and FPGA rows matched by hand |
+| **Compute = `START`→`DONE` wall time in every FPGA mode, plus cycles** | Comparable across modes; cycles show the pure hardware share. | Cycles only: hides polling overhead |
+| **`buf` splits large images into chunks** | Images bigger than the buffer (`BUF_BLOCKS`, 1024 blocks = 256×256) still run, so `buf` can be compared on every image. | Refusing images that don't fit |
+| **`dma` deferred to phase 9** | Needs the mSGDMA and reserved memory, which don't exist yet; code written now couldn't be tested. | Untested driver code now |
+| **Default log folder `results/`** | On the board next to `dctq`, copied into `docs/board/` afterwards. On the PC, pass `--log docs/logs`. Ignored by git. | Logging into `docs/` on the board |
+
+### Build
+
+```
+make -C HPS native        # PC: build/test_ref + build/dctq (stubs)
+make -C HPS board         # board, if make exists
+# board without make (in HPS/):
+mkdir -p build && gcc -O2 -Wall -Wextra -std=c11 -Iinclude \
+    src/main.c src/fpga.c src/timing.c src/dct_ref.c src/test_blocks.c \
+    src/image.c src/quality.c src/ref_selftest.c src/reslog.c -o build/dctq -lm
+```
+
+The file list is explicit, not `src/*.c`, because `src/` still contains the old `data_setup.c`, which is not part of `dctq`.
+
+### Results (phase 5, PC)
+
+All PC checks passed on the first build (2026-11-20, `docs/logs/`):
+
+| Check | Result |
+|---|---|
+| `dctq selftest` | 13/13 |
+| `dctq blocktest --mode sw` | 279 blocks, 0 bad |
+| `dctq run test_256x256.bmp --mode sw --runs 10` | PSNR 28.37 dB, MSE 94.616: identical to the phase 1 `test_ref` result |
+| `dctq blocktest --mode reg` on the PC | Stops cleanly: hardware not available |
+
+PC timing for reference only (x86, not the board): preprocess 0.166 ms, DCT + quantization 1.936 ms, total 2.131 ms for 1024 blocks (about 1.9 µs per block). The board's Cortex-A9 will be several times slower; its numbers come from `dctq run` in phase 7.
+
+Not yet tested: everything in `fpga.c`'s hardware version, which can only run on the board.

@@ -24,6 +24,8 @@ test_images/large/
 # ---------------------------------------------------------------------
 out/
 *.dctq
+# dctq's default log folder (board results are copied into docs/board/ by hand)
+results/
 
 # ---------------------------------------------------------------------
 # Simulation (Linux): Verilator, Icarus, Yosys, waveforms

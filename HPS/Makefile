@@ -1,9 +1,19 @@
-# HPS Makefile - C reference library and (from phase 5) the dctq program.
+# HPS Makefile - C reference library, test_ref (PC tests) and the dctq program.
 #
-#   make                 build build/test_ref
-#   make test            run the self-test (logs to LOGDIR)
-#   make test IMG=x.bmp  ... plus PSNR at Q scales x1/x2/x4/x8, recon images in OUTDIR
+#   make  /  make native   build build/test_ref and build/dctq
+#   make board             build build/dctq only (on the board; same sources)
+#   make test              run the self-test (logs to LOGDIR)
+#   make test IMG=x.bmp    ... plus PSNR at Q scales x1/x2/x4/x8, recon images in OUTDIR
 #   make clean
+#
+# dctq picks its hardware layer automatically: the real one when compiled on the
+# ARM board, stubs on the PC (only --mode sw works there). See src/fpga.c.
+#
+# Without make (e.g. on the board), from this HPS/ directory:
+#   mkdir -p build && gcc -O2 -Wall -Wextra -std=c11 -Iinclude \
+#       src/main.c src/fpga.c src/timing.c src/dct_ref.c src/test_blocks.c \
+#       src/image.c src/quality.c src/ref_selftest.c src/reslog.c \
+#       -o build/dctq -lm
 #
 # Usually run from the top level: make c [IMG=...]
 
@@ -21,11 +31,18 @@ IMG    ?=
 REF_SRCS := src/dct_ref.c src/test_blocks.c src/image.c src/quality.c \
             src/ref_selftest.c src/reslog.c
 REF_OBJS := $(REF_SRCS:src/%.c=$(BUILD)/%.o)
+
+# dctq: the board program (also builds on the PC, software mode only)
+DCTQ_SRCS := src/main.c src/fpga.c src/timing.c
+DCTQ_OBJS := $(DCTQ_SRCS:src/%.c=$(BUILD)/%.o)
+
 HEADERS  := $(wildcard include/*.h)
 
-.PHONY: all native test clean
+.PHONY: all native board test clean
 
-all native: $(BUILD)/test_ref
+all native: $(BUILD)/test_ref $(BUILD)/dctq
+
+board: $(BUILD)/dctq
 
 $(BUILD):
 	mkdir -p $@
@@ -36,7 +53,10 @@ $(BUILD)/%.o: src/%.c $(HEADERS) | $(BUILD)
 $(BUILD)/test_ref: tests/test_ref.c $(REF_OBJS) $(HEADERS) | $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_ref.c $(REF_OBJS) -o $@ $(LDLIBS)
 
-test: $(BUILD)/test_ref
+$(BUILD)/dctq: $(DCTQ_OBJS) $(REF_OBJS) | $(BUILD)
+	$(CC) $(CFLAGS) $(DCTQ_OBJS) $(REF_OBJS) -o $@ $(LDLIBS)
+
+test: $(BUILD)/test_ref $(BUILD)/dctq
 	mkdir -p $(OUTDIR)
 	./$(BUILD)/test_ref --log $(LOGDIR) --tmp $(BUILD) \
 	    $(if $(IMG),$(IMG) --recon-prefix $(OUTDIR)/recon)

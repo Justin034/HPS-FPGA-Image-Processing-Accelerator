@@ -1,0 +1,2 @@
+Date,Host,Image,Size,Mode,Engines,Lanes,Scale,Runs,Preprocess ms,Transfer ms,Compute ms,Total ms,SW total ms,Speedup,Cycles,Match,PSNR dB
+2026-11-20 01:31:19,nil,test_256x256.bmp,256x256,sw,-,-,1,10,0.166,0.000,1.936,2.131,2.131,1.00,-,-,28.37

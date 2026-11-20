@@ -346,3 +346,28 @@ The testbench drives the slaves like the HPS (`csr_write`, `csr_read`, `buf_writ
 Runs for `NUM_ENGINES` = 1 and 2, seeds 1–3 plus a run without stream backpressure; one row per run in `docs/logs/sim.md` (cycles/block column = mode 1).
 
 Yosys (`make synth`) synthesises `dct_accel` with small buffers as a portability check; Quartus is authoritative.
+
+### Results (phase 4)
+
+All runs pass after one testbench fix (below): `make lint` clean, `make synth` OK, and 279 blocks bit-exact in every mode for `NUM_ENGINES` = 1 and 2, seeds 1–3 plus a run without stream backpressure (`docs/logs/sim.md`, 2026-11-20 01:05–01:06).
+
+| | `NUM_ENGINES = 1` | `NUM_ENGINES = 2` |
+|---|---|---|
+| Mode 0, cycles per `START` | 153 | 153 |
+| Mode 1, cycles per block | 152.0 | 76.3 |
+| Mode 2, cycles per block, no backpressure | 152.0 | 76.3 |
+| Mode 2, cycles per block, random gaps 20 % / 30 % | 160.5–160.7 | 80.6–81.0 |
+
+The figures match the expected values. The engine and array alone give 152 / 76.3 cycles per block, so the feeders add nothing per block (mode 1's single priming cycle disappears in the average). Mode 0 is 152 + 1. With random gaps, mode 2 is as slow as the bare array under the same gaps (160.4–161.0 / 80.5–80.6), so the stream ports add no overhead of their own.
+
+### Issue found: stream monitor released `ready` half a cycle early
+
+**Symptom.** The first `dct_accel` runs (2026-11-20 01:01–01:02, 8 FAIL rows still in `sim.md`) all reported `2 errors` but `bad blocks: 0, 0, 0`. Mode 2 showed about 3,500 cycles per block.
+
+**Meaning.** Every coefficient was correct. The two errors were "mode 2 still `BUSY` at timeout" and "`STATUS` not `DONE`". `CYCLE_COUNT` runs while `BUSY`, so it had counted through the testbench's whole polling timeout (about 939,000 cycles); spread over 279 blocks, that is the ~3,500.
+
+**Cause (testbench, not RTL).** The testbench samples on the falling edge, and an Avalon-ST transfer happens on the next rising edge. On the job's last beat, `m2_receive` counted the beat and dropped `aso_ready` straight away, before that rising edge. The accelerator never saw its last beat accepted and correctly stayed `BUSY`, as it would with a real sink that stopped taking data.
+
+**Fix.** Keep `aso_ready` high for one more falling edge after the last beat. The earlier testbenches didn't have the problem because their output monitors never release `ready`.
+
+**Lesson.** A testbench that ends a stream must hold its handshake signals until the rising edge after the last transfer. On the board, the same situation (a stalled mSGDMA) shows up as a `dctq` timeout followed by `SOFT_RESET`.
