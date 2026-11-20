@@ -1,0 +1,17 @@
+# synth.ys - quick Yosys check that dct_accel synthesises (run from FPGA/sim: make synth).
+#
+# Generic synthesis, not Cyclone V: it shows the RTL is synthesisable and gives
+# rough cell counts. The Quartus fit report (phase 6) is authoritative.
+# The mode-1 buffers are made small here, because generic synthesis turns RAMs
+# into flip-flops; Quartus maps the full-size buffers to M10K blocks.
+
+read_verilog -sv ../rtl/dct_engine.sv
+read_verilog -sv ../rtl/dct_array.sv
+read_verilog -sv ../rtl/dct_ram.sv
+read_verilog -sv ../rtl/dct_accel.sv
+
+chparam -set NUM_ENGINES 1 -set BUF_IN_WORDS 64 -set BUF_OUT_WORDS 128 dct_accel
+
+synth -top dct_accel
+check -assert
+tee -o build/synth_stat.txt stat

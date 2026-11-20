@@ -4,7 +4,7 @@ SystemVerilog for the accelerator, its Verilator testbenches, and (later) the Pl
 
 - **Phase 2:** `dct_engine`, one DCT + quantizer engine (sections 2–7).
 - **Phase 3:** `dct_array`, several engines behind one stream (section 8).
-- Phase 4 adds `dct_accel` (registers and data-path feeders).
+- **Phase 4:** `dct_accel`, registers and data-path feeders around the array (section 10), with `dct_ram` for the option-2 buffers.
 
 ---
 
@@ -235,9 +235,114 @@ Same approach as the engine testbench (C reference through DPI-C, random backpre
 ## 9. Build and test
 
 ```
-make lint        # strict lint of dct_engine and dct_array
-make sim         # lint + engine (LANES=1, 8) + array (NUM_ENGINES=1, 2, 4), seeds 1 2 3 + timing runs
+make lint        # strict lint of dct_engine, dct_array, dct_accel
+make sim         # lint + engine (LANES=1, 8) + array (NUM_ENGINES=1, 2, 4) + accel (NUM_ENGINES=1, 2),
+                 # seeds 1 2 3 + timing runs
+make synth       # Yosys: dct_accel synthesises (generic cells, small buffers)
 make -C FPGA/sim engine LANES_LIST=8 SEEDS="4 5 6 7"     # more seeds
 make -C FPGA/sim array ENGINES_LIST="8"                  # 8 engines
+make -C FPGA/sim accel ACCEL_ENGINES_LIST="4"            # accelerator with 4 engines
 make -C FPGA/sim engine SCALE=8                          # another Q scale
 ```
+
+---
+
+## 10. `dct_accel` (phase 4)
+
+The component that goes into Platform Designer. It wraps `dct_array` with everything the HPS talks to, so the same engines serve all four data-path options.
+
+```
+                 ┌──────────────────────────────── dct_accel ──────────────────────────────────┐
+  CSR slave ────►│ registers: CTRL STATUS NUM_BLOCKS CYCLE_COUNT INFO BUF_BLOCKS MAGIC SCRATCH  │
+  (LW bridge,    │            Q_TABLE ──(broadcast)──► engines                                  │
+   32-bit)       │                                                                              │
+                 │ MODE 0  IN_BLOCK regs (64×8) ──┐                     ┌──► OUT_BLOCK regs     │
+                 │                                │   ┌────────────┐    │     (64×16)           │
+  buffer slave ─►│ MODE 1  in_ram  (dct_ram) ─────┼──►│ dct_array  │────┼──► out_ram (dct_ram) ◄─┼── buffer slave
+  (main bridge,  │                                │   │ N engines  │    │                       │   (reads)
+   64-bit)       │ MODE 2  asi_* (mSGDMA M→S) ────┘   └────────────┘    └──► aso_* (mSGDMA S→M)  │
+                 └──────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Register map (CSR slave, byte offsets)
+
+| Offset | Name | Access | Meaning |
+|---|---|---|---|
+| `0x000` | `CTRL` | R/W | bit 0 `START` (write 1; self-clearing) · bit 1 `SOFT_RESET` (write 1; self-clearing) · bits 5:4 `MODE` (0 reg, 1 buffer, 2 stream) |
+| `0x004` | `STATUS` | R | bit 0 `BUSY` · bit 1 `DONE` (cleared by the next `START`) · bit 2 `ERROR` · bit 3 `ENGINES_BUSY` (debug) |
+| `0x008` | `NUM_BLOCKS` | R/W | Blocks per `START` in modes 1 and 2 (mode 0 always does one) |
+| `0x00C` | `CYCLE_COUNT` | R | Cycles from `START` to `DONE` |
+| `0x010` | `INFO` | R | `[7:0]` NUM_ENGINES · `[15:8]` LANES · `[27:16]` DATA_WIDTH · `[31:28]` version (1) |
+| `0x014` | `BUF_BLOCKS` | R | Capacity of the mode-1 buffer in blocks (1024 by default) |
+| `0x018` | `MAGIC` | R | `0x44435431` ("DCT1"): confirms the component is at this address |
+| `0x01C` | `SCRATCH` | R/W | No effect; bus write/readback test |
+| `0x100–0x1FC` | `Q_TABLE` | R/W | 64 reciprocals `R` (17 bit); read back from a shadow copy |
+| `0x200–0x2FC` | `IN_BLOCK` | R/W | Mode 0: 64 pixels, one per word (bits 7:0) |
+| `0x300–0x3FC` | `OUT_BLOCK` | R | Mode 0: 64 coefficients, one per word, sign-extended |
+
+**`ERROR`** is set, and nothing starts, when `START` is written with `MODE` = 3, with `NUM_BLOCKS` = 0 (modes 1, 2), with `NUM_BLOCKS` > `BUF_BLOCKS` (mode 1), or while `BUSY` (the running job continues). The next accepted `START` or a `SOFT_RESET` clears it.
+
+**`SOFT_RESET`** acts in the cycle it is written: it stops the job and clears `BUSY`/`DONE`/`ERROR`, the counters and the engines. `MODE`, `NUM_BLOCKS`, the Q table and the buffers are kept. `dctq` uses it after a timeout.
+
+`MODE` and `NUM_BLOCKS` can't be changed while `BUSY`. `MODE` is written together with `START` (`CTRL = START | MODE << 4`).
+
+### Buffer slave (mode 1)
+
+| Word offset | Byte offset (64-bit) | Contents |
+|---|---|---|
+| `0 … BUF_IN_WORDS−1` | `0x00000 – 0x0FFFF` | Input pixels in block order (HPS writes; can be read back while idle) |
+| `BUF_IN_WORDS … +BUF_OUT_WORDS−1` | `0x10000 – 0x2FFFF` | Output coefficients in block order (HPS reads; writes ignored) |
+
+Byte enables are honoured on the input region, so any CPU store width works. The span is 256 KB (18 address bits of bytes, 15 of 64-bit words).
+
+### How each mode moves data
+
+| Mode | Input side | Output side | `DONE` when |
+|---|---|---|---|
+| 0 | Beat *k* of the block is built from `IN_BLOCK[8k … 8k+7]` | Each beat writes 4 entries of `OUT_BLOCK` | the block's last beat is stored |
+| 1 | `in_ram` read port is handed to the feeder; it reads one word ahead whenever a beat is taken, so the RAM output always holds the next beat (one priming cycle per job) | Each beat is written to `out_ram` at the next address | `NUM_BLOCKS` blocks stored |
+| 2 | `asi_ready` = array ready **and** a job is running **and** blocks remain: no beat is taken before `START` or beyond `NUM_BLOCKS` | `aso_*` follows the array; `startofpacket` on the job's first beat, `endofpacket` on its last | `NUM_BLOCKS` blocks accepted by the sink |
+
+In modes 0 and 1 the output side is always ready, so the engines never stall.
+
+### Expected cycles (`LANES = 8`, no backpressure)
+
+| | `NUM_ENGINES = 1` | `NUM_ENGINES = 2` |
+|---|---|---|
+| Mode 0, per `START` | ≈ 154 (152 + priming + finish) | ≈ 154 (one block uses one engine) |
+| Mode 1 / 2, per block | ≈ 152 | ≈ 76 |
+
+The HPS-side cost of mode 0 (128 bridge accesses per block) will dominate on the board; the hardware cycles are for reference.
+
+### Design decisions
+
+| Decision | Reasoning | Alternative rejected |
+|---|---|---|
+| **One component, `MODE` register** | One Quartus build serves options 1, 2 and 3/4; the board switches by software. Every option uses the same engines, so comparisons are fair. | A separate build per option |
+| **Two Avalon-MM slaves** | Registers on the lightweight bridge (small, slow, fine for control); the buffer on the main bridge (wide, fast). Matches `idea.md` §4. | Buffer behind the lightweight bridge: 32-bit, slow |
+| **Separate input and output RAMs, each simple dual-port** | One write and one read port per RAM is the form Quartus infers most reliably as M10K (with byte enables). The HPS writes `in_ram` and reads `out_ram`; the engines read `in_ram` and write `out_ram`. | One true dual-port RAM: two write ports, less portable inference |
+| **Input-buffer read port shared (Avalon when idle, feeder when running)** | Keeps `in_ram` simple dual-port. Reading the input back is only needed for checks, when idle. | A third port |
+| **Read-ahead address instead of a FIFO** | The feeder presents `addr + 1` to the RAM when a beat is taken, so data is ready the next cycle with no skid buffer. | A small FIFO between RAM and array |
+| **`IN_BLOCK`/`OUT_BLOCK` as registers** | 64 bytes in, 128 bytes out: tiny, and mode 0 needs 8 pixels in parallel per beat. | RAM: would need a wide parallel read |
+| **Q table shadow** | Engines' tables are write-only; the shadow lets `hwcheck` read the table back. | No readback |
+| **`ERROR` instead of silently ignoring bad commands** | A wrong `NUM_BLOCKS` or a double `START` shows up on the board at once instead of as a timeout. | Ignore silently |
+| **Mode 2 accepts exactly `NUM_BLOCKS` blocks** | If the mSGDMA sends extra data, or starts before `START`, nothing enters the engines out of step. | Free-running stream |
+| **`SOFT_RESET` in the write cycle** | The next `STATUS` read already shows idle; no wait needed in `dctq`. | A registered pulse: one cycle late |
+| **`MAGIC` and `SCRATCH`** | `hwcheck` can prove it is talking to this component at the expected address, and test the bus, without side effects. | Only `INFO` |
+
+### Verification (`tb/tb_dct_accel.sv`)
+
+The testbench drives the slaves like the HPS (`csr_write`, `csr_read`, `buf_write`, `buf_read`, polling `STATUS`) and the stream ports like the two mSGDMAs.
+
+| Step | Checks |
+|---|---|
+| Registers | Reset values, `INFO`, `MAGIC`, `BUF_BLOCKS`, `SCRATCH` and all 64 `Q_TABLE` entries read back |
+| Errors | `MODE` 3, `NUM_BLOCKS` 0, `NUM_BLOCKS` > `BUF_BLOCKS` → `ERROR` only; `SOFT_RESET` clears it |
+| Mode 0 | All 279 test blocks through `IN_BLOCK`/`OUT_BLOCK`, one `START` each; `IN_BLOCK` readback |
+| Mode 1 | All blocks in one `START`; every third word written in two halves plus one write with no byte enabled; input readback; cycles per block from `CYCLE_COUNT` |
+| Busy / reset | `START` while busy → `BUSY|ERROR`; `SOFT_RESET` mid-job → idle, Q table kept; re-run with different blocks so stale output can't pass |
+| Mode 2 | All blocks through the streams with random gaps on both sides; SOP/EOP on first/last beat of the job; no beat accepted before `START` or after the job |
+
+Runs for `NUM_ENGINES` = 1 and 2, seeds 1–3 plus a run without stream backpressure; one row per run in `docs/logs/sim.md` (cycles/block column = mode 1).
+
+Yosys (`make synth`) synthesises `dct_accel` with small buffers as a portability check; Quartus is authoritative.
